@@ -62,15 +62,24 @@ class TeamState(TypedDict):
 def triage(state: TeamState) -> dict:
     """Label every issue, one structured-output call per issue."""
     # TODO 2.1
-    # your code here
-    raise NotImplementedError
+    model = config.chat().with_structured_output(Label)
+    code = "\n\n".join(f"# {path}\n{text}" for path, text in repo_files().items()
+                       if path.startswith("huskyutils/"))
+    labels, reasons = {}, {}
+    for issue in state["issues"]:
+        decided = retry(model.invoke, TRIAGE_PROMPT.format(code=code, issue=issue_text(issue)))
+        labels[issue["number"]] = decided.label
+        reasons[issue["number"]] = decided.reasoning
+    return {"labels": labels, "reasons": reasons}
 
 
 def fan_out(state: TeamState):
     """One Send per issue triage labeled a bug, or straight to the report if there are none."""
     # TODO 2.2
-    # your code here
-    raise NotImplementedError
+    bugs = [i for i in state["issues"] if state["labels"].get(i["number"]) == "bug"]
+    if not bugs:
+        return "report"
+    return [Send("fix", {"issue": i, "note": state["reasons"].get(i["number"], "")}) for i in bugs]
 
 
 def fix(job: dict) -> dict:
@@ -105,8 +114,8 @@ def facts(state: TeamState) -> list[str]:
 def summary(state: TeamState) -> str:
     """The paragraph at the top of the report, written by the model from the facts only."""
     # TODO 2.3
-    # your code here
-    raise NotImplementedError
+    prompt = REPORT_PROMPT.format(facts="\n".join(facts(state)))
+    return text_of(retry(config.chat().invoke, prompt)).strip()
 
 
 def report(state: TeamState) -> dict:
@@ -125,7 +134,7 @@ def report(state: TeamState) -> dict:
         if r and r["fix"]:
             fix = r["fix"]
             part += [f"**Fix** ({STATUS[r['status']]}): {fix['note']}",
-                     "```diff\n" + diff(fix["path"], files[fix["path"]], fix["new_code"]).strip() + "\n```",
+                     "```diff\n" + diff(fix["path"], files.get(fix["path"], ""), fix["new_code"]).strip() + "\n```",
                      f"**Verifier:** {r['evidence'].strip()}"]
             if r["test"]:
                 part.append(f"<details><summary>The verifier's test</summary>\n\n```python\n{r['test'].strip()}\n```\n\n</details>")
@@ -138,8 +147,15 @@ def report(state: TeamState) -> dict:
 
 def build_graph():
     # TODO 2.4
-    # your code here
-    raise NotImplementedError
+    builder = StateGraph(TeamState)
+    builder.add_node("triage", triage)
+    builder.add_node("fix", fix)
+    builder.add_node("report", report)
+    builder.add_edge(START, "triage")
+    builder.add_conditional_edges("triage", fan_out, ["fix", "report"])
+    builder.add_edge("fix", "report")
+    builder.add_edge("report", END)
+    return builder.compile()
 
 
 def run(issues, callbacks=None):
