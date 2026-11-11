@@ -143,8 +143,8 @@ def outputs(label):
 
 def interface():
     choices = list(names())
-    with gr.Blocks(title="DADA3 - Huskyutils Bug-fixing Team") as demo:
-        gr.Markdown("# DADA3 - Huskyutils Bug-fixing Team\nTriage decides whether an issue is a bug. Each bug "
+    with gr.Blocks(title="Agentic Code Ops") as demo:
+        gr.Markdown("# Agentic Code Ops\nTriage decides whether an issue is a bug. Each bug "
                     "gets a pair: the fixer writes a fix, and the verifier, a deep agent with a sandbox that is "
                     "not shown the fix, tests it and accepts it or sends it back."
                     f"\n\nChat model: `{config.model_name()}`. Sandbox: `{config.SANDBOX}`.")
