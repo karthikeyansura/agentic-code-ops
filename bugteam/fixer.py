@@ -35,8 +35,10 @@ def list_files() -> str:
 def read_file(path: str) -> str:
     """Read one file of the repository, for example huskyutils/text.py."""
     # TODO 1.1
-    # your code here
-    raise NotImplementedError
+    files = repo_files()
+    if path not in files:
+        return f"There is no file {path!r}. The files are:\n" + "\n".join(files)
+    return files[path]
 
 
 @tool
@@ -44,8 +46,7 @@ def transfer_to_verifier(path: str, new_code: str, note: str) -> str:
     """Hand your fix to the verifier. path: the file you changed. new_code: the complete new content of
     that file. note: what was wrong and what you changed, in one or two sentences."""
     # TODO 1.1
-    # your code here
-    raise NotImplementedError
+    return "The verifier has your fix."
 
 
 TOOLS = [list_files, read_file, transfer_to_verifier]
@@ -54,8 +55,7 @@ TOOLS = [list_files, read_file, transfer_to_verifier]
 def after_tools(state: MessagesState) -> str:
     """After the tools run: stop if the fix was handed over, otherwise back to the model."""
     # TODO 1.2
-    # your code here
-    raise NotImplementedError
+    return END if state["messages"][-1].name == "transfer_to_verifier" else "assistant"
 
 
 def build_fixer():
