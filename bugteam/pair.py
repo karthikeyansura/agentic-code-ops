@@ -55,15 +55,15 @@ def verifier_node(state: PairState) -> dict:
 def after_fixer(state: PairState) -> str:
     """To the verifier if the fixer handed over a fix this time, otherwise the pair is done."""
     # TODO 1.5
-    # your code here
-    raise NotImplementedError
+    return END if state["status"] == "no_fix" else "verifier"
 
 
 def after_verifier(state: PairState) -> str:
     """Done if the fix was verified or the rounds are used up, otherwise back to the fixer."""
     # TODO 1.5
-    # your code here
-    raise NotImplementedError
+    if state["status"] == "verified" or state["rounds"] >= config.MAX_ROUNDS:
+        return END
+    return "fixer"
 
 
 def build_pair():
