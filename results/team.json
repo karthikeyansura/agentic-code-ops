@@ -1,0 +1,155 @@
+{
+ "model": "gemini-3.5-flash-lite",
+ "sandbox": "daytona",
+ "max_rounds": 3,
+ "calls": 114,
+ "tokens": 2403638,
+ "seconds": 632,
+ "labels": {
+  "1": "bug",
+  "2": "bug",
+  "3": "not_a_bug",
+  "4": "bug",
+  "5": "bug",
+  "6": "bug",
+  "7": "enhancement",
+  "8": "bug",
+  "9": "not_a_bug",
+  "10": "bug"
+ },
+ "reasons": {
+  "1": "The slugify function replaces every non-alphanumeric character with a hyphen individually rather than collapsing runs, and it doesn't strip leading/trailing hyphens. The code fails the docstring promise.",
+  "2": "The function `split_amount` simply returns equal integer division shares, failing to distribute remainder cents as required by its docstring stating the shares add up to `cents` and differ by at most one cent.",
+  "3": "The docstring explicitly states that punctuation stays attached to the word, so \"don't\" is counted as one word. The code correctly implements this behavior, making the issue a disagreement with the specification rather than a bug.",
+  "4": "add_business_days simply adds days and shifts forward if the target falls on a weekend or holiday, failing to count distinct business days properly.",
+  "5": "The docstring states that intervals can be in any order and the result is sorted by start time. The implementation iterates and merges without sorting first, returning unsorted results.",
+  "6": "The function `shipping_cost` checks `if weight_kg < 1` for the $5.00 tier, so a weight of exactly 1 falls through to the $9.00 tier, violating the docstring which promises $5.00 for up to and including 1 kg.",
+  "7": "The shipping_cost function calculates cost based on weight, not order total. A request to add free shipping for orders over $50 asks for new functionality not promised by the docstring.",
+  "8": "The median function for an even number of values simply indexes the middle element of the sorted list instead of averaging the two middle values, violating its docstring.",
+  "9": "The docstring states that packages over 5 kg cost $9.00 plus $2.00 for each started kilogram over 5, while up to and including 5 kg costs $9.00. A 5 kg package costs $9.00, which matches the spec.",
+  "10": "The truncate function docstring specifies that the result is at most limit characters long, but the implementation simply slices text[:limit] + '...' without enforcing the limit or handling word boundaries as described."
+ },
+ "results": [
+  {
+   "number": 1,
+   "title": "Slugs have double hyphens and a hyphen at the end",
+   "status": "verified",
+   "rounds": 1,
+   "fix": {
+    "note": "Fixed slugify to handle accent normalization, collapse runs of non-alphanumeric characters into single hyphens, and strip leading/trailing hyphens as specified by the docstring.",
+    "path": "huskyutils/text.py",
+    "new_code": "\"\"\"Text helpers for product pages.\"\"\"\nimport re\nimport unicodedata\n\n\ndef slugify(title):\n    \"\"\"Turn a product title into a URL slug.\n\n    The slug is lowercase ASCII. Accented letters lose their accents (\u00e9 becomes e). Letters and\n    digits are kept. Every run of other characters (spaces, punctuation, symbols) becomes a single\n    hyphen, and the slug never starts or ends with a hyphen. A title with no letters or digits gives\n    the empty string.\n\n        slugify(\"Wireless Headphones\") == \"wireless-headphones\"\n        slugify(\"USB-C Dock (2nd gen)\") == \"usb-c-dock-2nd-gen\"\n        slugify(\"Cr\u00e8me Br\u00fbl\u00e9e Mug\") == \"creme-brulee-mug\"\n    \"\"\"\n    # Normalize unicode to decompose accented characters, keeping ASCII letters/digits\n    nfkd = unicodedata.normalize(\"NFKD\", title.lower())\n    ascii_title = \"\".join(c for c in nfkd if not unicodedata.combining(c))\n    \n    # Replace runs of non-alphanumeric characters with a single hyphen, and strip leading/trailing hyphens\n    slug = re.sub(r'[^a-z0-9]+', '-', ascii_title)\n    return slug.strip('-')\n\n\ndef word_count(text):\n    \"\"\"Count the words in a review.\n\n    Words are separated by whitespace. Punctuation stays attached to the word it touches, so\n    \"great,\" and \"don't\" are one word each.\n\n        word_count(\"Great keyboard, fast shipping\") == 4\n    \"\"\"\n    return len(text.split())\n"
+   },
+   "evidence": "Ran tests in original/ and fixed/ using python -m unittest discover -s tests -v. In original/, our newly added tests in tests/test_issue.py failed (reproducing the issue and catching the discrepancy with docstring examples and issue cases), while in fixed/, all 27 tests (including our new issue/docstring tests and pre-existing tests) passed successfully.",
+   "test": "import unittest\n\nfrom huskyutils.text import slugify\n\n\nclass TestSlugifyIssue(unittest.TestCase):\n    def test_docstring_examples(self):\n        self.assertEqual(slugify(\"Wireless Headphones\"), \"wireless-headphones\")\n        self.assertEqual(slugify(\"USB-C Dock (2nd gen)\"), \"usb-c-dock-2nd-gen\")\n        self.assertEqual(slugify(\"Cr\u00e8me Br\u00fbl\u00e9e Mug\"), \"creme-brulee-mug\")\n\n    def test_issue_cases(self):\n        self.assertEqual(slugify(\"Hello, World! T-shirt\"), \"hello-world-t-shirt\")\n        self.assertEqual(slugify(\"Webcam (HD)\"), \"webcam-hd\")\n",
+   "log": [
+    "fixer -> verifier: Fixed slugify to handle accent normalization, collapse runs of non-alphanumeric characters into single hyphens, and strip leading/trailing hyphens as specified by the docstring.",
+    "verifier accepted the fix"
+   ]
+  },
+  {
+   "number": 2,
+   "title": "Shared payment loses a cent",
+   "status": "verified",
+   "rounds": 2,
+   "fix": {
+    "note": "Fixed split_amount to compute division on absolute value of cents and then negate shares for negative amounts, matching the docstring examples.",
+    "path": "huskyutils/money.py",
+    "new_code": "\"\"\"Payments.\"\"\"\n\n\ndef split_amount(cents, people):\n    \"\"\"Split an amount in cents into `people` shares, for a shared order.\n\n    The shares add up to exactly `cents` and differ by at most one cent. When the amount does not\n    divide evenly, the first shares get the extra cent. A negative amount (a refund) is split the\n    same way as the positive amount, with every share negative. `people` is at least 1.\n\n        split_amount(900, 3) == [300, 300, 300]\n        split_amount(1000, 3) == [334, 333, 333]\n        split_amount(-1000, 3) == [-334, -333, -333]\n    \"\"\"\n    abs_cents = abs(cents)\n    share, remainder = divmod(abs_cents, people)\n    shares = [share] * people\n    for i in range(remainder):\n        shares[i] += 1\n    if cents < 0:\n        shares = [-s for s in shares]\n    return shares\n"
+   },
+   "evidence": "Ran `python -m unittest discover -s tests -v` in both original and fixed directories. In `original/`, `test_split_amount_examples` failed with `AssertionError: Lists differ: [333, 333, 333] != [334, 333, 333]`, demonstrating that the issue was present. In `fixed/`, all 26 tests passed successfully.",
+   "test": "import unittest\n\nfrom huskyutils.money import split_amount\n\n\nclass TestSplitAmountIssue(unittest.TestCase):\n    def test_split_amount_examples(self):\n        self.assertEqual(split_amount(900, 3), [300, 300, 300])\n        self.assertEqual(split_amount(1000, 3), [334, 333, 333])\n        self.assertEqual(split_amount(-1000, 3), [-334, -333, -333])\n",
+   "log": [
+    "fixer -> verifier: Fixed split_amount to distribute remainder cents to the first shares according to the docstring.",
+    "verifier -> fixer: In fixed/, split_amount(-1000, 3) returns [-335, -335, -334] instead of [-334, -333, -333] as specified in the docstring. Note that Python's // and divmod behave differently with negative numbers (-1000 // 3 is -334, but remainder is 2, so floor division gives -334 base with remainder +2). Wait, let's check what -1000 // 3 gives: -334 * 3 = -1002, so -1000 = (-334 * 3) + 2. But standard integer division floor rounds towards negative infinity in Python: -1000 / 3 = -333.333..., so -1000 // 3 = -334, and remainder = -1000 % 3 = 2. Thus shares start at -334, and adding remainder gives -335, -335, -334. But the docstring specifies split_amount(-1000, 3) == [-334, -333, -333].",
+    "fixer -> verifier: Fixed split_amount to compute division on absolute value of cents and then negate shares for negative amounts, matching the docstring examples.",
+    "verifier accepted the fix"
+   ]
+  },
+  {
+   "number": 4,
+   "title": "Delivery date skips over the weekend wrong",
+   "status": "verified",
+   "rounds": 1,
+   "fix": {
+    "path": "huskyutils/dates.py",
+    "new_code": "\"\"\"Order and delivery dates.\"\"\"\nfrom datetime import timedelta\n\n\ndef add_business_days(start, days, holidays=()):\n    \"\"\"The date `days` business days after `start`.\n\n    Business days are Monday to Friday, except the dates in `holidays`. Saturdays, Sundays, and\n    holidays are skipped. `days` is zero or more. With days == 0 the result is `start` itself, even\n    if `start` is not a business day. Otherwise the result is always a business day.\n\n        # 2026-11-06 is a Friday\n        add_business_days(date(2026, 11, 6), 1) == date(2026, 11, 9)                             # Monday\n        add_business_days(date(2026, 11, 6), 1, holidays={date(2026, 11, 9)}) == date(2026, 11, 10)\n    \"\"\"\n    if days == 0:\n        return start\n    result = start\n    added = 0\n    while added < days:\n        result += timedelta(days=1)\n        if result.weekday() < 5 and result not in holidays:\n            added += 1\n    return result\n",
+    "note": "Fixed add_business_days to properly count distinct business days instead of just adding total days and shifting forward."
+   },
+   "evidence": "Ran `python -m unittest discover -s tests -v` in both `/home/daytona/original` and `/home/daytona/fixed`. In `original/`, `test_thursday_plus_three_business_days` failed as expected (returning 2026-11-09 instead of 2026-11-10). In `fixed/`, all 26 tests passed successfully.",
+   "test": "import unittest\nfrom datetime import date\n\nfrom huskyutils.dates import add_business_days\n\n\nclass TestIssue4(unittest.TestCase):\n    def test_thursday_plus_three_business_days(self):\n        # 2026-11-05 is a Thursday\n        # 3 business days of handling should be Tuesday 2026-11-10\n        self.assertEqual(add_business_days(date(2026, 11, 5), 3), date(2026, 11, 10))\n",
+   "log": [
+    "fixer -> verifier: Fixed add_business_days to properly count distinct business days instead of just adding total days and shifting forward.",
+    "verifier accepted the fix"
+   ]
+  },
+  {
+   "number": 5,
+   "title": "Delivery windows overlap after merging",
+   "status": "verified",
+   "rounds": 1,
+   "fix": {
+    "note": "Sorted intervals by start time before merging so that out-of-order intervals are correctly merged and sorted in the result as per docstring.",
+    "path": "huskyutils/intervals.py",
+    "new_code": "\"\"\"Delivery time windows.\"\"\"\n\n\ndef merge_intervals(intervals):\n    \"\"\"Merge overlapping delivery windows.\n\n    `intervals` is a list of [start, end] pairs with start <= end, in any order. Windows that\n    overlap or touch (one ends where the next starts) are merged into one. The result is sorted by\n    start time.\n\n    Returns a new list. The input list and the pairs in it are not modified.\n\n        merge_intervals([[1, 3], [2, 6], [8, 10]]) == [[1, 6], [8, 10]]\n        merge_intervals([[1, 4], [4, 5]]) == [[1, 5]]\n    \"\"\"\n    if not intervals:\n        return []\n    sorted_intervals = sorted(intervals, key=lambda x: x[0])\n    merged = []\n    for start, end in sorted_intervals:\n        if merged and start <= merged[-1][1]:\n            merged[-1][1] = max(merged[-1][1], end)\n        else:\n            merged.append([start, end])\n    return merged\n"
+   },
+   "evidence": "Ran `python -m unittest discover -s tests -v` in both original/ and fixed/. In original/, `test_merge_intervals_docstring_and_issue` failed with `AssertionError: Lists differ: [[8, 10]] != [[1, 6], [8, 10]]` as expected. In fixed/, all 26 tests passed successfully.",
+   "test": "import unittest\n\nfrom huskyutils.intervals import merge_intervals\n\n\nclass TestIssueIntervals(unittest.TestCase):\n    def test_merge_intervals_docstring_and_issue(self):\n        self.assertEqual(merge_intervals([[8, 10], [1, 3], [2, 6]]), [[1, 6], [8, 10]])\n        self.assertEqual(merge_intervals([[1, 3], [2, 6], [8, 10]]), [[1, 6], [8, 10]])\n        self.assertEqual(merge_intervals([[1, 4], [4, 5]]), [[1, 5]])\n",
+   "log": [
+    "fixer -> verifier: Sorted intervals by start time before merging so that out-of-order intervals are correctly merged and sorted in the result as per docstring.",
+    "verifier accepted the fix"
+   ]
+  },
+  {
+   "number": 6,
+   "title": "A 1 kg package is charged $9 shipping",
+   "status": "verified",
+   "rounds": 1,
+   "fix": {
+    "new_code": "\"\"\"Shipping prices.\"\"\"\nimport math\n\n\ndef shipping_cost(weight_kg):\n    \"\"\"The shipping price of a package, in cents.\n\n    - Up to and including 1 kg: $5.00\n    - Over 1 kg, up to and including 5 kg: $9.00\n    - Over 5 kg: $9.00 plus $2.00 for each started kilogram over 5\n\n        shipping_cost(0.4) == 500\n        shipping_cost(5.2) == 1100\n    \"\"\"\n    if weight_kg <= 1:\n        return 500\n    if weight_kg <= 5:\n        return 900\n    return 900 + 200 * math.ceil(weight_kg - 5)\n",
+    "path": "huskyutils/shipping.py",
+    "note": "Changed `if weight_kg < 1:` to `if weight_kg <= 1:` so that packages weighing exactly 1 kg are charged the $5.00 tier as specified in the docstring."
+   },
+   "evidence": "Ran `python -m unittest discover -s tests -v` in original/ and fixed/. In original/, `test_shipping_cost_one_kg` failed with AssertionError: 900 != 500 (reproducing issue #6). In fixed/, all 27 tests passed successfully.",
+   "test": "import unittest\n\nfrom huskyutils.shipping import shipping_cost\n\n\nclass TestShippingIssue(unittest.TestCase):\n    def test_shipping_cost_docstring_examples(self):\n        self.assertEqual(shipping_cost(0.4), 500)\n        self.assertEqual(shipping_cost(5.2), 1100)\n\n    def test_shipping_cost_one_kg(self):\n        self.assertEqual(shipping_cost(1), 500)\n",
+   "log": [
+    "fixer -> verifier: Changed `if weight_kg < 1:` to `if weight_kg <= 1:` so that packages weighing exactly 1 kg are charged the $5.00 tier as specified in the docstring.",
+    "verifier accepted the fix"
+   ]
+  },
+  {
+   "number": 8,
+   "title": "Median on the sales dashboard is wrong for an even number of days",
+   "status": "verified",
+   "rounds": 1,
+   "fix": {
+    "note": "Fixed median calculation for an even number of values to compute the average of the two middle values.",
+    "path": "huskyutils/stats.py",
+    "new_code": "\"\"\"Statistics for the sales dashboard.\"\"\"\n\n\ndef median(values):\n    \"\"\"The median of a non-empty list of numbers.\n\n    The values can be in any order, and the list is not modified. With an odd number of values the\n    median is the middle one. With an even number it is the average of the two middle values.\n\n        median([3, 1, 2]) == 2\n        median([4, 1, 3, 2]) == 2.5\n    \"\"\"\n    ordered = sorted(values)\n    n = len(ordered)\n    mid = n // 2\n    if n % 2 == 1:\n        return ordered[mid]\n    else:\n        return (ordered[mid - 1] + ordered[mid]) / 2\n"
+   },
+   "evidence": "Ran `python -m unittest discover -s tests -v` in original/ and fixed/. In original/, the tests in tests/test_issue.py failed as expected (reproducing the issue), showing AssertionError: 3 != 2.5 and 30 != 25. In fixed/, all 27 tests passed successfully.",
+   "test": "import unittest\n\nfrom huskyutils.stats import median\n\n\nclass TestIssueMedian(unittest.TestCase):\n    def test_even_number_of_days_docstring_examples(self):\n        self.assertEqual(median([3, 1, 2]), 2)\n        self.assertEqual(median([4, 1, 3, 2]), 2.5)\n\n    def test_issue_sales_dashboard_even(self):\n        self.assertEqual(median([10, 20, 30, 40]), 25)\n",
+   "log": [
+    "fixer -> verifier: Fixed median calculation for an even number of values to compute the average of the two middle values.",
+    "verifier accepted the fix"
+   ]
+  },
+  {
+   "number": 10,
+   "title": "Product card description runs past the edge of the card",
+   "status": "verified",
+   "rounds": 1,
+   "fix": {
+    "path": "huskyutils/cards.py",
+    "new_code": "\"\"\"Product cards on the store's listing pages.\"\"\"\n\n\ndef truncate(text, limit):\n    \"\"\"Shorten a product description so that it fits on a product card.\n\n    If `text` is at most `limit` characters long, it is returned unchanged. Otherwise the result\n    ends with \"...\" and is at most `limit` characters long, the \"...\" included. Words are never cut\n    in the middle: the result keeps as many whole words from the start as fit, separated by single\n    spaces, with no space before the \"...\". If not even the first word fits, the result is the first\n    `limit - 3` characters followed by \"...\". `limit` is at least 10.\n\n        truncate(\"Wireless headphones\", 30) == \"Wireless headphones\"\n        truncate(\"Wireless noise-cancelling headphones with case\", 30) == \"Wireless noise-cancelling...\"\n    \"\"\"\n    if len(text) <= limit:\n        return text\n\n    words = text.split()\n    current = \"\"\n    for word in words:\n        if current:\n            candidate = current + \" \" + word\n        else:\n            candidate = word\n\n        if len(candidate) + 3 <= limit:\n            current = candidate\n        else:\n            break\n\n    if current:\n        return current + \"...\"\n\n    # If not even the first word fits within limit - 3\n    return text[: limit - 3] + \"...\"\n",
+    "note": "Fixed truncate implementation in huskyutils/cards.py to properly respect word boundaries and ensure the returned string is at most limit characters long."
+   },
+   "evidence": "Ran tests in original/ where test_issue.py failed (reproducing Issue #10), and ran tests in fixed/ where all 27 tests passed successfully.",
+   "test": "import unittest\n\nfrom huskyutils.cards import truncate\n\n\nclass TestTruncateIssue10(unittest.TestCase):\n    def test_docstring_examples(self):\n        self.assertEqual(truncate(\"Wireless headphones\", 30), \"Wireless headphones\")\n        self.assertEqual(\n            truncate(\"Wireless noise-cancelling headphones with case\", 30),\n            \"Wireless noise-cancelling...\",\n        )\n\n    def test_issue_headphones_length(self):\n        s = truncate(\"Wireless noise-cancelling headphones with case\", 30)\n        self.assertLessEqual(len(s), 30)\n        self.assertEqual(s, \"Wireless noise-cancelling...\")\n",
+   "log": [
+    "fixer -> verifier: Fixed truncate implementation in huskyutils/cards.py to properly respect word boundaries and ensure the returned string is at most limit characters long.",
+    "verifier accepted the fix"
+   ]
+  }
+ ]
+}
